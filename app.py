@@ -9,7 +9,7 @@ import copy
 
 # ページ基本設定
 st.set_page_config(page_title="汎用エクセル帳票ジェネレーター", layout="wide")
-st.title("📊 汎用エクセル帳票発行システム（エクセルテンプレート連動型）")
+st.title("📊 汎用エクセル帳票発行システム（フィールドID連動型）")
 
 # ── 【安全なSecrets取得処理】 ──
 if "pocket" in st.secrets:
@@ -21,23 +21,23 @@ else:
 
 MAPPING_FILE = "template_mappings.json"
 
-# ── 【デフォルト設定（プレースホルダーと@pocketフィールドIDの紐づけ）】 ──
+# ── 【デフォルト設定（#なしのフィールドIDと@pocketキーの紐づけ）】 ──
 DEFAULT_MAPPINGS = {
     "mitumori_template": {
         "header": {
-            "#field-2": "Title",      # 見積番号
-            "#field-36": "ClassA",    # 顧客名
-            "#field-15": "ClassB",    # 品名
-            "#field-34": "NumA",      # 金額
-            "#field-37": "ClassC"     # 担当者
+            "field-2": "Title",      # 見積番号
+            "field-36": "ClassA",    # 顧客名
+            "field-15": "ClassB",    # 品名
+            "field-34": "NumA",      # 金額
+            "field-37": "ClassC"     # 担当者
         },
         "details": {
-            "template_keyword": "#field-31_2", # このキーワードが含まれる行を明細の雛形とする
+            "template_keyword": "field-31_2", # このキーワードが含まれる行を明細の雛形とする
             "columns": {
-                "#field-31_2": "ItemName",   # 品名・詳細仕様
-                "#field-31_4": "Quantity",   # 数量
-                "#field-31_3": "UnitPrice",  # 単価
-                "#field-31_6": "Amount"      # 金額
+                "field-31_2": "ItemName",   # 品名・詳細仕様
+                "field-31_4": "Quantity",   # 数量
+                "field-31_3": "UnitPrice",  # 単価
+                "field-31_6": "Amount"      # 金額
             }
         }
     }
@@ -86,7 +86,7 @@ def fetch_pocket_record(record_id):
             raw_details = data.get("Results", [])
             if not raw_details:
                 raw_details = [
-                    {"ItemName": "特選 生ウニ（100g）ソート品", "Quantity": 10, "UnitPrice": 5000, "Amount": 50000},
+                    {"ItemName": "特選 生ウニ（100g）", "Quantity": 10, "UnitPrice": 5000, "Amount": 50000},
                     {"ItemName": "厳選 イクラ醤油漬け（500g）", "Quantity": 5, "UnitPrice": 8000, "Amount": 40000},
                 ]
             return data, raw_details
@@ -107,7 +107,7 @@ if not target_record_id:
     }
     pocket_details_raw = [
         {"ItemName": "上質紙 70kg 四六判 裁断加工", "Quantity": 1000, "UnitPrice": 50, "Amount": 50000},
-        {"ItemName": "コート紙 135kg 梱包・納品費用", "Quantity": 1, "Loss": 0, "UnitPrice": 100000, "Amount": 100000}
+        {"ItemName": "コート紙 135kg 梱包・納品費用", "Quantity": 1, "UnitPrice": 100000, "Amount": 100000}
     ]
 
 # ── タブ構成 ──
@@ -119,7 +119,6 @@ tab1, tab2 = st.tabs(["📥 帳票ダウンロード", "⚙️ テンプレー�
 with tab1:
     st.header("帳票の生成とダウンロード")
     
-    # ルートディレクトリにある .xlsx ファイルを自動検出
     template_files = [f.replace(".xlsx", "") for f in os.listdir(".") if f.endswith(".xlsx") and not f.startswith("~")]
     if not template_files:
         template_files = list(mappings_data.keys())
@@ -140,7 +139,7 @@ with tab1:
     cols = st.columns(2)
     i = 0
     for placeholder, pocket_key in header_rules.items():
-        default_val = passed_estimate_no if placeholder == "#field-2" else raw_pocket_data.get(pocket_key, "")
+        default_val = passed_estimate_no if placeholder == "field-2" else raw_pocket_data.get(pocket_key, "")
         with cols[i % 2]:
             input_headers[placeholder] = st.text_input(
                 f"{placeholder} (← @pocketキー: {pocket_key})",
@@ -175,7 +174,7 @@ with tab1:
         template_filename = f"{selected_template}.xlsx"
         
         if not os.path.exists(template_filename):
-            st.error(f"テンプレートファイル '{template_filename}' がアプリのルートディレクトリに見つかりません。エクセルファイルをアップロードまたは配置してください。")
+            st.error(f"テンプレートファイル '{template_filename}' がアプリのルートディレクトリに見つかりません。")
         else:
             try:
                 wb = openpyxl.load_workbook(template_filename)
@@ -191,10 +190,9 @@ with tab1:
                                     cell.value = cell.value.replace(placeholder, str(replacement_val))
 
                 # ② 明細行の動的展開処理
-                template_keyword = detail_rules.get("template_keyword", "#field-31_2")
+                template_keyword = detail_rules.get("template_keyword", "field-31_2")
                 target_row_idx = None
                 
-                # テンプレート内でキーワードが含まれる行を検索
                 for r in range(1, ws.max_row + 1):
                     for c in range(1, ws.max_column + 1):
                         val = ws.cell(row=r, column=c).value
@@ -205,18 +203,14 @@ with tab1:
                         break
                 
                 if target_row_idx and not edited_df.empty:
-                    # テンプレート行のスタイル・結合情報をコピー用に保持
                     template_row_cells = [ws.cell(row=target_row_idx, column=c).value for c in range(1, ws.max_column + 1)]
                     
-                    # 最初の1行目は既存の行にそのまま書き込み、2行目以降は下へ挿入
                     for index, row in edited_df.iterrows():
                         current_row = target_row_idx + index
                         if index > 0:
                             ws.insert_rows(current_row)
-                            # 書式・高さをコピー
                             ws.row_dimensions[current_row].height = ws.row_dimensions[target_row_idx].height
                         
-                        # 各列のプレースホルダーを置換
                         for c in range(1, ws.max_column + 1):
                             cell = ws.cell(row=current_row, column=c)
                             orig_val = ws.cell(row=target_row_idx, column=c).value if index == 0 else template_row_cells[c-1]
@@ -247,8 +241,8 @@ with tab1:
 # タブ2：マッピング設定管理
 # ==========================================
 with tab2:
-    st.header("テンプレートごとのプレースホルダー紐づけ設定")
-    st.write("エクセルに書き込んだプレースホルダー（例: `#field-36`）と @pocket のフィールドキーの対応を管理できます。")
+    st.header("テンプレートごとのフィールドID紐づけ設定")
+    st.write("エクセルに書き込んだフィールドID（例: `field-36`）と @pocket キーの対応を管理できます。")
     
     edit_template = st.selectbox(
         "編集するテンプレートを選択",
@@ -256,9 +250,9 @@ with tab2:
         key="edit_select"
     )
     
-    target_conf = mappings_data.get(edit_template, {"header": {}, "details": {"template_keyword": "#field-31_2", "columns": {}}})
+    target_conf = mappings_data.get(edit_template, {"header": {}, "details": {"template_keyword": "field-31_2", "columns": {}}})
     
-    st.subheader("📌 ヘッダーのプレースホルダー設定")
+    st.subheader("📌 ヘッダーのフィールドID設定")
     current_header = target_conf.get("header", {})
     updated_header = {}
     headers_to_delete = []
@@ -266,7 +260,7 @@ with tab2:
     for placeholder, pocket_key in list(current_header.items()):
         c1, c2, c3 = st.columns([3, 3, 1])
         with c1:
-            new_p = st.text_input("プレースホルダー", value=placeholder, key=f"hp_{edit_template}_{placeholder}")
+            new_p = st.text_input("フィールドID", value=placeholder, key=f"hp_{edit_template}_{placeholder}")
         with c2:
             new_k = st.text_input("@pocketキー", value=pocket_key, key=f"hk_{edit_template}_{placeholder}")
         with c3:
@@ -279,18 +273,18 @@ with tab2:
         if k in updated_header: del updated_header[k]
         
     st.write("➕ ヘッダー項目の追加")
-    np_field = st.text_input("プレースホルダー (例: #field-38)", key=f"np_{edit_template}")
+    np_field = st.text_input("フィールドID (例: field-38)", key=f"np_{edit_template}")
     nk_field = st.text_input("@pocketキー (例: ClassD)", key=f"nk_{edit_template}")
     if np_field:
         updated_header[np_field] = nk_field
 
     st.divider()
-    st.subheader("📌 明細行のプレースホルダー設定")
-    current_details = target_conf.get("details", {"template_keyword": "#field-31_2", "columns": {}})
+    st.subheader("📌 明細行のフィールドID設定")
+    current_details = target_conf.get("details", {"template_keyword": "field-31_2", "columns": {}})
     
-    template_kw = st.text_input("明細行検出キーワード (例: #field-31_2)", value=current_details.get("template_keyword", "#field-31_2"))
+    template_kw = st.text_input("明細行検出キーワード (例: field-31_2)", value=current_details.get("template_keyword", "field-31_2"))
     
-    st.write("明細列の紐づけ（プレースホルダー と @pocketキー）")
+    st.write("明細列の紐づけ（フィールドID と @pocketキー）")
     current_cols = current_details.get("columns", {})
     updated_cols = {}
     cols_to_delete_d = []
@@ -298,7 +292,7 @@ with tab2:
     for placeholder, pocket_key in list(current_cols.items()):
         c1, c2, c3 = st.columns([3, 3, 1])
         with c1:
-            dp = st.text_input("明細プレースホルダー", value=placeholder, key=f"dp_{edit_template}_{placeholder}")
+            dp = st.text_input("明細フィールドID", value=placeholder, key=f"dp_{edit_template}_{placeholder}")
         with c2:
             dk = st.text_input("@pocketキー", value=pocket_key, key=f"dk_{edit_template}_{placeholder}")
         with c3:
@@ -311,7 +305,7 @@ with tab2:
         if k in updated_cols: del updated_cols[k]
 
     st.write("➕ 明細列の追加")
-    nd_p = st.text_input("明細プレースホルダー (例: #field-31_5)", key=f"ndp_{edit_template}")
+    nd_p = st.text_input("明細フィールドID (例: field-31_5)", key=f"ndp_{edit_template}")
     nd_k = st.text_input("@pocketキー (例: Spec)", key=f"ndk_{edit_template}")
     if nd_p:
         updated_cols[nd_p] = nd_k
