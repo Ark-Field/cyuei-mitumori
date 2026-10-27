@@ -227,4 +227,85 @@ with tab1:
                 wb.save(output)
                 output.seek(0)
                 
-                st.success("✨ エクセルの生成に
+                st.success("✨ エクセルの生成に成功しました！デザインも完全維持されています！")
+                st.download_button(
+                    label=f"📥 {selected_template}_出力結果.xlsx をダウンロード",
+                    data=output,
+                    file_name=f"{selected_template}_出力結果.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            except Exception as e:
+                st.error(f"エクセル生成エラー: {e}")
+
+# ==========================================
+# タブ2：マッピング設定管理
+# ==========================================
+with tab2:
+    st.header("テンプレートごとのセル関連付け設定")
+    st.write("ヘッダーのセル番地や、明細の書き始め行（start_row）・列割り当てをここで調整できます。")
+    
+    edit_template = st.selectbox(
+        "編集するテンプレートを選択",
+        options=list(mappings_data.keys()),
+        key="edit_select"
+    )
+    
+    target_conf = mappings_data.get(edit_template, {"header": {}, "details": {"start_row": 9, "columns": {}}})
+    
+    st.subheader("📌 ヘッダー項目のマッピング設定")
+    current_header = target_conf.get("header", {})
+    updated_header = {}
+    headers_to_delete = []
+    
+    for field_name, cell_pos in list(current_header.items()):
+        c1, c2, c3 = st.columns([3, 3, 1])
+        with c1:
+            new_k = st.text_input("項目名", value=field_name, key=f"hk_{edit_template}_{field_name}")
+        with c2:
+            new_v = st.text_input("セル番地", value=cell_pos, key=f"hv_{edit_template}_{field_name}")
+        with c3:
+            if st.button("🗑️ 削除", key=f"hdel_{edit_template}_{field_name}"):
+                headers_to_delete.append(field_name)
+        if new_k and new_k not in headers_to_delete:
+            updated_header[new_k] = new_v
+
+    for k in headers_to_delete:
+        if k in updated_header: del updated_header[k]
+        
+    # ヘッダー追加
+    nh_field = st.text_input("追加するヘッダー項目名 (例: 担当者)", key=f"nh_{edit_template}")
+    nh_cell = st.text_input("対応するセル番地 (例: B4)", key=f"nc_{edit_template}")
+    if nh_field and nh_cell:
+        updated_header[nh_field] = nh_cell
+
+    st.divider()
+    st.subheader("📌 明細（テーブル）のマッピング設定")
+    current_details = target_conf.get("details", {"start_row": 9, "columns": {}})
+    
+    start_row_input = st.number_input("明細の書き始め行 (start_row)", value=int(current_details.get("start_row", 9)), min_int=1)
+    
+    st.write("列の割り当て（例: 品名 -> B, 数量 -> D）")
+    current_cols = current_details.get("columns", {})
+    updated_cols = {}
+    
+    for f_name, c_letter in list(current_cols.items()):
+        c1, c2 = st.columns(2)
+        with c1:
+            dk = st.text_input("項目", value=f_name, key=f"dk_{edit_template}_{f_name}")
+        with c2:
+            dv = st.text_input("列アルファベット", value=c_letter, key=f"dv_{edit_template}_{f_name}")
+        if dk:
+            updated_cols[dk] = dv
+
+    # 設定保存ボタン
+    if st.button("💾 すべての設定を保存する", type="primary"):
+        mappings_data[edit_template] = {
+            "header": updated_header,
+            "details": {
+                "start_row": start_row_input,
+                "columns": updated_cols
+            }
+        }
+        save_mappings(mappings_data)
+        st.success("✅ マッピング設定を保存しました！")
+        st.rerun()
