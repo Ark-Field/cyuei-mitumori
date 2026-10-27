@@ -103,11 +103,10 @@ def fetch_pocket_data(record_id):
                 "見積番号": passed_estimate_no or data.get("Title", ""),
                 "顧客名": data.get("Body", "サンプル株式会社"),
                 "発行日": "2026-10-27",
-                "合計金額": "" # 自動計算
+                "合計金額": "" 
             }
             
-            # 明細データの抽出（※@pocketのテーブル項目の構造に合わせて調整可能。なければサンプル）
-            # 例として、APIから子テーブルや Results が取れる場合はここにバインドします
+            # 明細データのサンプル（※実際の@pocketの構造に合わせて拡張可能）
             sample_details = [
                 {"品名": "特選 生ウニ（100g）", "備考": "冷蔵便", "数量": 10, "単価": 5000},
                 {"品名": "厳選 イクラ醤油漬け（500g）", "備考": "冷凍便", "数量": 5, "単価": 8000},
@@ -180,7 +179,7 @@ with tab1:
     df_details_input = pd.DataFrame(pocket_details)
     edited_df = st.data_editor(
         df_details_input,
-        num_rows="dynamic", # 行の追加・削除を自由に行える
+        num_rows="dynamic",
         use_container_width=True,
         key="detail_editor"
     )
@@ -210,7 +209,7 @@ with tab1:
                 col_mapping = detail_rules.get("columns", {})
                 
                 for index, row in edited_df.iterrows():
-                    current_row = start_row + index # 9行目、10行目、11行目…と下へズラす
+                    current_row = start_row + index # 9行目、10行目、11行目…と下に展開
                     
                     for field_name, col_letter in col_mapping.items():
                         cell_address = f"{col_letter}{current_row}"
@@ -282,7 +281,8 @@ with tab2:
     st.subheader("📌 明細（テーブル）のマッピング設定")
     current_details = target_conf.get("details", {"start_row": 9, "columns": {}})
     
-    start_row_input = st.number_input("明細の書き始め行 (start_row)", value=int(current_details.get("start_row", 9)), min_int=1)
+    # ★ min_value=1 に修正済み
+    start_row_input = st.number_input("明細の書き始め行 (start_row)", value=int(current_details.get("start_row", 9)), min_value=1)
     
     st.write("列の割り当て（例: 品名 -> B, 数量 -> D）")
     current_cols = current_details.get("columns", {})
