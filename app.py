@@ -4,40 +4,62 @@ import io
 import json
 import os
 import requests
+import pandas as pd
 
 # ページ基本設定
 st.set_page_config(page_title="汎用エクセル帳票ジェネレーター", layout="wide")
-st.title("📊 汎用エクセル帳票発行システム")
+st.title("📊 汎用エクセル帳票発行システム（ヘッダー＆明細対応版）")
 
-# ── 【安全なSecrets取得処理（エラー回避版）】 ──
+# ── 【安全なSecrets取得処理】 ──
 if "pocket" in st.secrets:
     POCKET_API_KEY = st.secrets["pocket"].get("api_key", "XZtsgp27LemoHhCkwkoEiS2MZMyCU4Ay7qyYF8PS")
     POCKET_BASE_URL = st.secrets["pocket"].get("base_url", "https://app070.at-pocket.com/arkf05_bb")
 else:
-    # Secretsが未設定の場合でもエラー落ちしないためのフォールバック
     POCKET_API_KEY = "XZtsgp27LemoHhCkwkoEiS2MZMyCU4Ay7qyYF8PS"
     POCKET_BASE_URL = "https://app070.at-pocket.com/arkf05_bb"
 
 APP_ID_ESTIMATE = 32 # 見積アプリID
 MAPPING_FILE = "template_mappings.json"
 
-# デフォルトのマッピング設定（初期データ）
+# ── 【デフォルトのマッピング設定（ヘッダー ＆ 明細ルール）】 ──
 DEFAULT_MAPPINGS = {
     "mitumoriV1": {
-        "見積番号": "A2",
-        "顧客名": "A3",
-        "発行日": "F3",
-        "合計金額": "F19"
+        "header": {
+            "見積番号": "A2",
+            "顧客名": "A3",
+            "発行日": "F3",
+            "合計金額": "F19"
+        },
+        "details": {
+            "start_row": 9,       # 明細を書き始める行
+            "columns": {
+                "品名": "B",      # B列
+                "備考": "C",      # C列
+                "数量": "D",      # D列
+                "単価": "E"       # E列 (金額FはエクセルのSUM数式で自動計算)
+            }
+        }
     },
     "mitumoriV2": {
-        "見積番号": "E1",
-        "顧客名": "B2",
-        "発行日": "E2",
-        "合計金額": "F25"
+        "header": {
+            "見積番号": "E1",
+            "顧客名": "B2",
+            "発行日": "E2",
+            "合計金額": "F25"
+        },
+        "details": {
+            "start_row": 12,
+            "columns": {
+                "品名": "B",
+                "備考": "C",
+                "数量": "D",
+                "単価": "E"
+            }
+        }
     }
 }
 
-# マッピング設定の読み込み
+# マッピング設定の読み込み・保存関数
 def load_mappings():
     if os.path.exists(MAPPING_FILE):
         with open(MAPPING_FILE, "r", encoding="utf-8") as f:
@@ -47,7 +69,6 @@ def load_mappings():
                 return DEFAULT_MAPPINGS
     return DEFAULT_MAPPINGS
 
-# マッピング設定の保存
 def save_mappings(mappings):
     with open(MAPPING_FILE, "w", encoding="utf-8") as f:
         json.dump(mappings, f, ensure_ascii=False, indent=4)
@@ -62,7 +83,7 @@ passed_estimate_no = query_params.get("estimate_no", "")
 # @pocketのAPI（アプリID: 32）からデータを取得する関数
 def fetch_pocket_data(record_id):
     if not record_id:
-        return {}
+        return {}, []
     
     api_url = f"{POCKET_BASE_URL}/api/items/{record_id}"
     headers = {"Content-Type": "application/json"}
@@ -76,28 +97,47 @@ def fetch_pocket_data(record_id):
         if response.status_code == 200:
             result = response.json()
             data = result.get("Response", {}).get("Data", {})
-            return {
+            
+            # ヘッダー情報の抽出
+            header_data = {
                 "見積番号": passed_estimate_no or data.get("Title", ""),
-                "顧客名": data.get("Body", "サンプル顧客"),
+                "顧客名": data.get("Body", "サンプル株式会社"),
                 "発行日": "2026-10-27",
-                "合計金額": "150000"
+                "合計金額": "" # 自動計算
             }
+            
+            # 明細データの抽出（※@pocketのテーブル項目の構造に合わせて調整可能。なければサンプル）
+            # 例として、APIから子テーブルや Results が取れる場合はここにバインドします
+            sample_details = [
+                {"品名": "特選 生ウニ（100g）", "備考": "冷蔵便", "数量": 10, "単価": 5000},
+                {"品名": "厳選 イクラ醤油漬け（500g）", "備考": "冷凍便", "数量": 5, "単価": 8000},
+            ]
+            
+            return header_data, sample_details
+            
     except Exception as e:
         st.error(f"API通信エラー: {e}")
-    return {}
+        
+    return {}, []
 
-# データの準備
-pocket_data = {}
+# データの取得・初期化
+pocket_header = {}
+pocket_details = []
+
 if target_record_id:
     st.sidebar.success(f"🔗 @pocket 連携中\n\n(ID: {target_record_id} / 見積番号: {passed_estimate_no})")
-    pocket_data = fetch_pocket_data(target_record_id)
+    pocket_header, pocket_details = fetch_pocket_data(target_record_id)
 else:
-    pocket_data = {
+    pocket_header = {
         "見積番号": passed_estimate_no or "EST-001",
         "顧客名": "テスト株式会社",
         "発行日": "2026-10-27",
-        "合計金額": "100000"
+        "合計金額": ""
     }
+    pocket_details = [
+        {"品名": "サンプル商品 A", "備考": "通常", "数量": 2, "単価": 10000},
+        {"品名": "サンプル商品 B", "備考": "特急", "数量": 1, "単価": 25000}
+    ]
 
 # ── タブ構成 ──
 tab1, tab2 = st.tabs(["📥 帳票ダウンロード", "⚙️ テンプレート・項目マッピング設定"])
@@ -112,23 +152,42 @@ with tab1:
         "使用するテンプレートを選択",
         options=list(mappings_data.keys())
     )
+    
+    current_config = mappings_data.get(selected_template, {})
+    header_rules = current_config.get("header", {})
+    detail_rules = current_config.get("details", {})
 
     st.divider()
-    st.subheader("📝 埋め込みデータの確認・編集")
+    st.subheader("📝 1. ヘッダー情報の確認・編集")
     
-    current_mapping = mappings_data.get(selected_template, {})
-    input_values = {}
+    input_headers = {}
+    cols = st.columns(2)
+    i = 0
+    for field_name, cell_pos in header_rules.items():
+        default_val = pocket_header.get(field_name, "")
+        with cols[i % 2]:
+            input_headers[field_name] = st.text_input(
+                f"{field_name} (セル: {cell_pos})",
+                value=default_val
+            )
+        i += 1
+
+    st.divider()
+    st.subheader("📝 2. 明細行の確認・編集（ループ展開）")
+    st.write(f"テンプレートのエクセル {detail_rules.get('start_row', 9)}行目 から順番に書き込まれます。")
     
-    for field_name, cell_pos in current_mapping.items():
-        default_val = pocket_data.get(field_name, "サンプル値")
-        input_values[field_name] = st.text_input(
-            f"{field_name} (セル: {cell_pos})",
-            value=default_val
-        )
+    # 明細を編集できる表形式（Data Editor）
+    df_details_input = pd.DataFrame(pocket_details)
+    edited_df = st.data_editor(
+        df_details_input,
+        num_rows="dynamic", # 行の追加・削除を自由に行える
+        use_container_width=True,
+        key="detail_editor"
+    )
 
     st.divider()
 
-    # エクセル生成ボタン
+    # 🚀 エクセル生成ボタン
     if st.button("🚀 帳票エクセルを生成する", type="primary"):
         template_filename = f"{selected_template}.xlsx"
         
@@ -140,69 +199,32 @@ with tab1:
                 wb = openpyxl.load_workbook(template_filename)
                 ws = wb.active
                 
-                # マッピング設定に従ってデータを指定セルに流し込む
-                for field_name, cell_pos in current_mapping.items():
-                    val = input_values.get(field_name, "")
+                # ① ヘッダー情報をピンポイントで流し込む
+                for field_name, cell_pos in header_rules.items():
+                    val = input_headers.get(field_name, "")
                     if cell_pos in ws:
                         ws[cell_pos] = val
                 
-                # メモリ上にバイナリとして保存
+                # ② 明細情報をループで順番に流し込む
+                start_row = detail_rules.get("start_row", 9)
+                col_mapping = detail_rules.get("columns", {})
+                
+                for index, row in edited_df.iterrows():
+                    current_row = start_row + index # 9行目、10行目、11行目…と下へズラす
+                    
+                    for field_name, col_letter in col_mapping.items():
+                        cell_address = f"{col_letter}{current_row}"
+                        if field_name in row:
+                            val = row[field_name]
+                            ws[cell_address] = val
+                            
+                            # 数値の場合はカンマ区切りフォーマットを適用
+                            if field_name in ["数量", "単価"] and pd.notnumeric(val):
+                                ws[cell_address].number_format = '#,##0'
+
+                # ③ メモリ上にバイナリとして保存
                 output = io.BytesIO()
                 wb.save(output)
                 output.seek(0)
                 
-                st.success("✨ エクセルの生成に成功しました！")
-                st.download_button(
-                    label=f"📥 {selected_template}_出力結果.xlsx をダウンロード",
-                    data=output,
-                    file_name=f"{selected_template}_出力結果.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-            except Exception as e:
-                st.error(f"エクセル生成エラー: {e}")
-
-# ==========================================
-# タブ2：マッピング設定管理
-# ==========================================
-with tab2:
-    st.header("テンプレートごとのセル関連付け設定")
-    st.write("テンプレートごとに、項目名とエクセルセル番地の対応関係を管理できます（変更は自動で保存されます）。")
-    
-    edit_template = st.selectbox(
-        "編集するテンプレートを選択",
-        options=list(mappings_data.keys()),
-        key="edit_select"
-    )
-    current_rules = mappings_data.get(edit_template, {})
-    
-    updated_rules = {}
-    cols_to_delete = []
-    
-    for field_name, cell_pos in list(current_rules.items()):
-        c1, c2, c3 = st.columns([3, 3, 1])
-        with c1:
-            new_key = st.text_input("項目名", value=field_name, key=f"key_{edit_template}_{field_name}")
-        with c2:
-            new_val = st.text_input("セル番地", value=cell_pos, key=f"val_{edit_template}_{field_name}")
-        with c3:
-            if st.button("🗑️ 削除", key=f"del_{edit_template}_{field_name}"):
-                cols_to_delete.append(field_name)
-        if new_key and new_key not in cols_to_delete:
-            updated_rules[new_key] = new_val
-
-    for k in cols_to_delete:
-        if k in updated_rules:
-            del updated_rules[k]
-
-    st.divider()
-    st.write("➕ 新しいマッピング項目の追加")
-    new_field = st.text_input("追加する項目名 (例: 担当者名)", key=f"new_field_{edit_template}")
-    new_cell = st.text_input("対応するセル番地 (例: B4)", key=f"new_cell_{edit_template}")
-    
-    if st.button("追加 / 更新を保存", type="primary"):
-        if new_field and new_cell:
-            updated_rules[new_field] = new_cell
-        mappings_data[edit_template] = updated_rules
-        save_mappings(mappings_data)
-        st.success("✅ マッピング設定を保存しました！")
-        st.rerun()
+                st.success("✨ エクセルの生成に
