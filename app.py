@@ -21,7 +21,7 @@ else:
 APP_ID_ESTIMATE = 32 # 見積アプリID
 MAPPING_FILE = "template_mappings.json"
 
-# ── 【デフォルトのマッピング設定（セル ＆ @pocketのAPIキー名 を紐づけ）】 ──
+# ── 【デフォルトのマッピング設定】 ──
 DEFAULT_MAPPINGS = {
     "mitumoriV1": {
         "header": {
@@ -107,7 +107,6 @@ raw_pocket_data = fetch_pocket_record_raw(target_record_id)
 if target_record_id:
     st.sidebar.success(f"🔗 @pocket 連携中\n\n(ID: {target_record_id} / 見積番号: {passed_estimate_no})")
 else:
-    # テスト用ダミーデータ
     raw_pocket_data = {
         "Title": passed_estimate_no or "EST-001",
         "ClassA": "テスト株式会社",
@@ -115,7 +114,6 @@ else:
         "NumA": "100000"
     }
 
-# サンプル明細データ（※@pocketのテーブル項目構造に合わせて拡張可能）
 pocket_details = [
     {"品名": "特選 生ウニ（100g）", "備考": "冷蔵便", "数量": 10, "単価": 5000},
     {"品名": "厳選 イクラ醤油漬け（500g）", "備考": "冷凍便", "数量": 5, "単価": 8000},
@@ -140,21 +138,25 @@ with tab1:
     detail_rules = current_config.get("details", {})
 
     st.divider()
-    st.subheader("📝 1. ヘッダー情報の確認・編集（設定キーに基づき自動抽出）")
+    st.subheader("📝 1. ヘッダー情報の確認・編集")
     
     input_headers = {}
     cols = st.columns(2)
     i = 0
     for field_name, rule in header_rules.items():
-        cell_pos = rule.get("cell", "")
-        pocket_key = rule.get("key", "")
+        # ★ 辞書型でも古い文字列型でも安全に処理する互換ロジック
+        if isinstance(rule, dict):
+            cell_pos = rule.get("cell", "")
+            pocket_key = rule.get("key", "")
+        else:
+            cell_pos = str(rule)
+            pocket_key = ""
         
-        # @pocketの生データから指定されたAPIキー（例: ClassA など）の値を自動取得
         default_val = passed_estimate_no if field_name == "見積番号" else raw_pocket_data.get(pocket_key, "")
         
         with cols[i % 2]:
             input_headers[field_name] = st.text_input(
-                f"{field_name} [セル: {cell_pos} / APIキー: {pocket_key}]",
+                f"{field_name} [セル: {cell_pos} / APIキー: {pocket_key or 'なし'}]",
                 value=str(default_val)
             )
         i += 1
@@ -186,7 +188,11 @@ with tab1:
                 
                 # ① ヘッダー情報をピンポイントで流し込む
                 for field_name, rule in header_rules.items():
-                    cell_pos = rule.get("cell", "")
+                    if isinstance(rule, dict):
+                        cell_pos = rule.get("cell", "")
+                    else:
+                        cell_pos = str(rule)
+                        
                     val = input_headers.get(field_name, "")
                     if cell_pos in ws:
                         ws[cell_pos] = val
@@ -241,13 +247,20 @@ with tab2:
     headers_to_delete = []
     
     for field_name, rule in list(current_header.items()):
+        if isinstance(rule, dict):
+            c_val = rule.get("cell", "")
+            k_val = rule.get("key", "")
+        else:
+            c_val = str(rule)
+            k_val = ""
+            
         c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
         with c1:
             new_k = st.text_input("項目名", value=field_name, key=f"hk_{edit_template}_{field_name}")
         with c2:
-            new_c = st.text_input("セル番地", value=rule.get("cell", ""), key=f"hc_{edit_template}_{field_name}")
+            new_c = st.text_input("セル番地", value=c_val, key=f"hc_{edit_template}_{field_name}")
         with c3:
-            new_key = st.text_input("@pocketキー", value=rule.get("key", ""), key=f"hkey_{edit_template}_{field_name}")
+            new_key = st.text_input("@pocketキー", value=k_val, key=f"hkey_{edit_template}_{field_name}")
         with c4:
             if st.button("🗑️ 削除", key=f"hdel_{edit_template}_{field_name}"):
                 headers_to_delete.append(field_name)
